@@ -1,0 +1,332 @@
+// ===============================
+// file: linalg.h
+// Minimal C-ABI for core.linalg (CPU reference). Row-major, float32.
+// ===============================
+#ifndef CORE_LINALG_H
+#define CORE_LINALG_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct RtStream RtStream; // opaque; ignored on CPU
+
+typedef enum {
+  LINALG_ALGO_AUTO = 0,
+  LINALG_ALGO_NAIVE = 1,
+  LINALG_ALGO_TILED = 2
+} LinalgGemmAlgo;
+
+// ---- BLAS-2/3 core ----
+int linalg_gemm_f32(bool transA, bool transB,
+                    int M, int N, int K,
+                    float alpha, const float* A, int ldA,
+                    const float* B, int ldB,
+                    float beta, float* C, int ldC,
+                    LinalgGemmAlgo algo, RtStream* s);
+
+// ---- Elementwise helpers ----
+int linalg_bias_add_row_f32(float* Z, const float* b, int M, int N, int ldZ, RtStream* s); // b: len M
+int linalg_bias_add_col_f32(float* Z, const float* b, int M, int N, int ldZ, RtStream* s); // b: len N
+
+int linalg_ewise_relu_f32(const float* Z, float* A, int64_t size, RtStream* s);
+int linalg_ewise_relu_bw_f32(const float* Z, const float* dA, float* dZ, int64_t size, RtStream* s);
+int linalg_ewise_sigmoid_f32(const float* Z, float* A, int64_t size, RtStream* s);
+int linalg_ewise_sigmoid_bw_f32(const float* A, const float* dA, float* dZ, int64_t size, RtStream* s);
+
+// ---- Reductions (row/col sums) ----
+int linalg_row_sum_f32(const float* A, int M, int N, int ldA, float* outN, RtStream* s); // len N
+int linalg_col_sum_f32(const float* A, int M, int N, int ldA, float* outM, RtStream* s); // len M
+
+// ---- Softmax & CE ----
+int linalg_softmax_row_f32(const float* Z, int M, int N, int ldZ, float* P, int ldP, RtStream* s);
+int linalg_ce_loss_from_logits_f32(const float* logits, int M, int N, int ldLogits,
+                                   const int32_t* labels, float* mean_loss, RtStream* s);
+int linalg_softmax_ce_logits_bw_f32(const float* logits, const int32_t* labels,
+                                    int M, int N, int ldLogits,
+                                    float* dZ, RtStream* s);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // CORE_LINALG_H
+
+
+// ===============================
+// file: linalg_cpu.c
+// Portable CPU reference implementations (naive but correct & stable)
+// ===============================
+#include "linalg.h"
+#include <math.h>
+#include <string.h>
+
+#ifndef LINALG_RESTRICT
+#  if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+#    define LINALG_RESTRICT restrict
+#  else
+#    define LINALG_RESTRICT
+#  endif
+#endif
+
+#define LINALG_OK 0
+#define LINALG_BAD_ARG -1
+
+static inline int valid_dims(int M,int N,int K,int ldA,int ldB,int ldC){
+  return (M>=0 && N>=0 && K>=0 && ldA>0 && ldB>0 && ldC>0);
+}
+
+int linalg_gemm_f32(bool transA, bool transB,
+                    int M, int N, int K,
+                    float alpha, const float* A, int ldA,
+                    const float* B, int ldB,
+                    float beta, float* C, int ldC,
+                    LinalgGemmAlgo algo, RtStream* s) {
+  (void)s; (void)algo; // CPU ignores stream/algorithm hint for now
+  if (!valid_dims(M,N,K,ldA,ldB,ldC) || !A || !B || !C) return LINALG_BAD_ARG;
+
+  // Scale C by beta first (safe if C alias occurs)
+  if (beta == 0.0f) {
+    for (int i=0;i<M;i++) {
+      float* Ci = C + (size_t)i*ldC;
+      for (int j=0;j<N;j++) Ci[j] = 0.0f;
+    }
+  } else if (beta != 1.0f) {
+    for (int i=0;i<M;i++) {
+      float* Ci = C + (size_t)i*ldC;
+      for (int j=0;j<N;j++) Ci[j] *= beta;
+    }
+  }
+
+  // Naive 3-loop GEMM with transA/transB handling
+  for (int i=0;i<M;i++) {
+    for (int k=0;k<K;k++) {
+      float aik = (!transA) ? A[(size_t)i*ldA + k] : A[(size_t)k*ldA + i];
+      float alpha_aik = alpha * aik;
+      const float* Bk = (!transB) ? (B + (size_t)k*ldB) : (B + k);
+      float* Ci = C + (size_t)i*ldC;
+      if (!transB) {
+        for (int j=0;j<N;j++) Ci[j] += alpha_aik * Bk[j];
+      } else {
+        for (int j=0;j<N;j++) Ci[j] += alpha_aik * Bk[(size_t)j*ldB];
+      }
+    }
+  }
+  return LINALG_OK;
+}
+
+int linalg_bias_add_row_f32(float* Z, const float* b, int M, int N, int ldZ, RtStream* s) {
+  (void)s; if (!Z || !b || M<0 || N<0 || ldZ<=0) return LINALG_BAD_ARG;
+  for (int i=0;i<M;i++) {
+    float bi = b[i];
+    float* Zi = Z + (size_t)i*ldZ;
+    for (int j=0;j<N;j++) Zi[j] += bi;
+  }
+  return LINALG_OK;
+}
+
+int linalg_bias_add_col_f32(float* Z, const float* b, int M, int N, int ldZ, RtStream* s) {
+  (void)s; if (!Z || !b || M<0 || N<0 || ldZ<=0) return LINALG_BAD_ARG;
+  for (int i=0;i<M;i++) {
+    float* Zi = Z + (size_t)i*ldZ;
+    for (int j=0;j<N;j++) Zi[j] += b[j];
+  }
+  return LINALG_OK;
+}
+
+int linalg_row_sum_f32(const float* A, int M, int N, int ldA, float* outN, RtStream* s) {
+  (void)s; if (!A || !outN || M<0 || N<0 || ldA<=0) return LINALG_BAD_ARG;
+  for (int j=0;j<N;j++) outN[j] = 0.0f;
+  for (int i=0;i<M;i++) {
+    const float* Ai = A + (size_t)i*ldA;
+    for (int j=0;j<N;j++) outN[j] += Ai[j];
+  }
+  return LINALG_OK;
+}
+
+int linalg_col_sum_f32(const float* A, int M, int N, int ldA, float* outM, RtStream* s) {
+  (void)s; if (!A || !outM || M<0 || N<0 || ldA<=0) return LINALG_BAD_ARG;
+  for (int i=0;i<M;i++) {
+    const float* Ai = A + (size_t)i*ldA;
+    float srow = 0.0f;
+    for (int j=0;j<N;j++) srow += Ai[j];
+    outM[i] = srow;
+  }
+  return LINALG_OK;
+}
+
+int linalg_ewise_relu_f32(const float* Z, float* A, int64_t size, RtStream* s) {
+  (void)s; if (!Z || !A || size<0) return LINALG_BAD_ARG;
+  for (int64_t i=0;i<size;i++) A[i] = Z[i] > 0.0f ? Z[i] : 0.0f;
+  return LINALG_OK;
+}
+
+int linalg_ewise_relu_bw_f32(const float* Z, const float* dA, float* dZ, int64_t size, RtStream* s) {
+  (void)s; if (!Z || !dA || !dZ || size<0) return LINALG_BAD_ARG;
+  for (int64_t i=0;i<size;i++) dZ[i] = (Z[i] > 0.0f) ? dA[i] : 0.0f;
+  return LINALG_OK;
+}
+
+static inline float sigmoid_stable(float x) {
+  if (x >= 0.0f) {
+    float t = expf(-x);
+    return 1.0f / (1.0f + t);
+  } else {
+    float t = expf(x);
+    return t / (1.0f + t);
+  }
+}
+
+int linalg_ewise_sigmoid_f32(const float* Z, float* A, int64_t size, RtStream* s) {
+  (void)s; if (!Z || !A || size<0) return LINALG_BAD_ARG;
+  for (int64_t i=0;i<size;i++) A[i] = sigmoid_stable(Z[i]);
+  return LINALG_OK;
+}
+
+int linalg_ewise_sigmoid_bw_f32(const float* A, const float* dA, float* dZ, int64_t size, RtStream* s) {
+  (void)s; if (!A || !dA || !dZ || size<0) return LINALG_BAD_ARG;
+  for (int64_t i=0;i<size;i++) {
+    float a = A[i];
+    dZ[i] = dA[i] * a * (1.0f - a);
+  }
+  return LINALG_OK;
+}
+
+int linalg_softmax_row_f32(const float* Z, int M, int N, int ldZ, float* P, int ldP, RtStream* s) {
+  (void)s; if (!Z || !P || M<0 || N<=0 || ldZ<=0 || ldP<=0) return LINALG_BAD_ARG;
+  for (int i=0;i<M;i++) {
+    const float* Zi = Z + (size_t)i*ldZ;
+    float* Pi = P + (size_t)i*ldP;
+    // 1) max
+    float m = Zi[0];
+    for (int j=1;j<N;j++) if (Zi[j] > m) m = Zi[j];
+    // 2) exp shift & sum
+    float sum = 0.0f;
+    for (int j=0;j<N;j++) {
+      float e = expf(Zi[j] - m);
+      Pi[j] = e;
+      sum += e;
+    }
+    // 3) normalize
+    float inv = 1.0f / sum;
+    for (int j=0;j<N;j++) Pi[j] *= inv;
+  }
+  return LINALG_OK;
+}
+
+int linalg_ce_loss_from_logits_f32(const float* logits, int M, int N, int ldLogits,
+                                   const int32_t* labels, float* mean_loss, RtStream* s) {
+  (void)s; if (!logits || !labels || !mean_loss || M<=0 || N<=0 || ldLogits<=0) return LINALG_BAD_ARG;
+  double total = 0.0; // extra precision for accumulation
+  for (int i=0;i<M;i++) {
+    const float* Li = logits + (size_t)i*ldLogits;
+    // log-sum-exp
+    float m = Li[0];
+    for (int j=1;j<N;j++) if (Li[j] > m) m = Li[j];
+    double sum = 0.0;
+    for (int j=0;j<N;j++) sum += exp((double)Li[j] - (double)m);
+    double lse = (double)m + log(sum);
+    int lbl = labels[i];
+    if (lbl < 0 || lbl >= N) return LINALG_BAD_ARG;
+    total += (lse - (double)Li[lbl]);
+  }
+  *mean_loss = (float)(total / (double)M);
+  return LINALG_OK;
+}
+
+int linalg_softmax_ce_logits_bw_f32(const float* logits, const int32_t* labels,
+                                    int M, int N, int ldLogits,
+                                    float* dZ, RtStream* s) {
+  (void)s; if (!logits || !labels || !dZ || M<0 || N<=0 || ldLogits<=0) return LINALG_BAD_ARG;
+  for (int i=0;i<M;i++) {
+    const float* Li = logits + (size_t)i*ldLogits;
+    float* dZi = dZ + (size_t)i*ldLogits; // output has same ld
+    // softmax row into dZi
+    float m = Li[0];
+    for (int j=1;j<N;j++) if (Li[j] > m) m = Li[j];
+    float sum = 0.0f;
+    for (int j=0;j<N;j++) { float e = expf(Li[j]-m); dZi[j] = e; sum += e; }
+    float inv = 1.0f / sum;
+    for (int j=0;j<N;j++) dZi[j] *= inv; // now dZi holds P
+    int lbl = labels[i];
+    if (lbl < 0 || lbl >= N) return LINALG_BAD_ARG;
+    dZi[lbl] -= 1.0f; // dZ = P - onehot(lbl)
+  }
+  return LINALG_OK;
+}
+
+
+// ===============================
+// file: test_mlp_ops.c
+// Tiny tests to lock signatures and sanity-check numerics.
+// ===============================
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include "linalg.h"
+
+#define CHECK_OK(expr) do { int _e = (expr); if (_e!=0) { \
+  fprintf(stderr, "FAIL: %s => %d\n", #expr, _e); return 1; } } while(0)
+
+static int nearly_eq(float a, float b, float eps){ return fabsf(a-b) <= eps * fmaxf(1.0f, fmaxf(fabsf(a), fabsf(b))); }
+
+int main(void){
+  // GEMM sanity: C = A(2x3) * B(3x2)
+  float A[2*3] = {1,2,3, 4,5,6}; // ldA=3
+  float B[3*2] = {7,8, 9,10, 11,12}; // ldB=2
+  float C[2*2] = {0};
+  CHECK_OK(linalg_gemm_f32(false,false, 2,2,3, 1.0f, A,3, B,2, 0.0f, C,2, LINALG_ALGO_NAIVE, NULL));
+  // Expected [[58,64],[139,154]]
+  if (!(C[0]==58 && C[1]==64 && C[2]==139 && C[3]==154)) { fprintf(stderr, "GEMM wrong\n"); return 1; }
+
+  // Bias add (col): add b over N=2
+  float bcol[2] = {1, -2};
+  CHECK_OK(linalg_bias_add_col_f32(C, bcol, 2,2,2, NULL));
+  if (!(C[0]==59 && C[1]==62 && C[2]==140 && C[3]==152)) { fprintf(stderr, "bias col wrong\n"); return 1; }
+
+  // Row/Col sum
+  float rowsumN[2]; float colsumM[2];
+  CHECK_OK(linalg_row_sum_f32(C,2,2,2, rowsumN, NULL)); // across rows => per col
+  CHECK_OK(linalg_col_sum_f32(C,2,2,2, colsumM, NULL));
+  if (!(rowsumN[0]==199 && rowsumN[1]==214)) { fprintf(stderr, "row_sum wrong\n"); return 1; }
+  if (!(colsumM[0]==121 && colsumM[1]==292)) { fprintf(stderr, "col_sum wrong\n"); return 1; }
+
+  // ReLU fwd/bw
+  float z[5] = {-2, -0.1f, 0.0f, 0.1f, 3}; float a[5];
+  CHECK_OK(linalg_ewise_relu_f32(z,a,5,NULL));
+  if (!(a[0]==0 && a[1]==0 && a[2]==0 && a[3]==0.1f && a[4]==3)) { fprintf(stderr, "relu fwd wrong\n"); return 1; }
+  float dA[5] = {1,1,1,1,1}, dZ[5];
+  CHECK_OK(linalg_ewise_relu_bw_f32(z,dA,dZ,5,NULL));
+  if (!(dZ[0]==0 && dZ[1]==0 && dZ[2]==0 && dZ[3]==1 && dZ[4]==1)) { fprintf(stderr, "relu bw wrong\n"); return 1; }
+
+  // Sigmoid fwd/bw
+  float asig[3]; float zs[3] = {-10, 0, 10};
+  CHECK_OK(linalg_ewise_sigmoid_f32(zs, asig, 3, NULL));
+  if (!(nearly_eq(asig[0], 0.000045f, 1e-2f) && nearly_eq(asig[1], 0.5f, 1e-6f) && nearly_eq(asig[2], 0.999955f, 1e-4f))) {
+    fprintf(stderr, "sigmoid fwd wrong: %f %f %f\n", asig[0],asig[1],asig[2]); return 1;
+  }
+  float dA_s[3] = {1,1,1}, dZ_s[3];
+  CHECK_OK(linalg_ewise_sigmoid_bw_f32(asig, dA_s, dZ_s, 3, NULL));
+
+  // Softmax row + CE loss + CE backward
+  float logits[2*3] = { 1, 2, 3,   1, -1, 0 }; // M=2, N=3, ld=3
+  int32_t labels[2] = {2, 0};
+  float P[2*3];
+  CHECK_OK(linalg_softmax_row_f32(logits,2,3,3, P,3,NULL));
+  float mean_ce;
+  CHECK_OK(linalg_ce_loss_from_logits_f32(logits,2,3,3, labels, &mean_ce, NULL));
+  if (!nearly_eq(mean_ce, 1.407606f, 1e-4f)) { fprintf(stderr, "CE mean wrong: %f\n", mean_ce); return 1; }
+  float dZ_ce[2*3];
+  CHECK_OK(linalg_softmax_ce_logits_bw_f32(logits, labels, 2,3,3, dZ_ce, NULL));
+  // dZ row 0 should sum to 0
+  float s0 = dZ_ce[0]+dZ_ce[1]+dZ_ce[2];
+  float s1 = dZ_ce[3]+dZ_ce[4]+dZ_ce[5];
+  if (!nearly_eq(s0,0.0f,1e-6f) || !nearly_eq(s1,0.0f,1e-6f)) { fprintf(stderr, "dZ rows not zero-sum\n"); return 1; }
+
+  printf("All tests PASS.\n");
+  return 0;
+}

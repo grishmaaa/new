@@ -1,0 +1,71 @@
+
+// extern "C" void naive_tensor_tgemm(const half* hA_rowmajor,
+//                         const half* hB_colmajor,
+//                         float* hC_rowmajor,
+//                         int M, int K, int N)   // MxN * NxK = MxK
+// {
+//     half* dA;
+//     half* dB;
+//     float* dC;
+
+//     size_t bytesA = (size_t)M * (size_t)N * sizeof(half);
+//     size_t bytesB = (size_t)N * (size_t)K * sizeof(half);
+//     size_t bytesC = (size_t)M * (size_t)K * sizeof(float);
+
+//     // Allocate device memory
+//     cudaMalloc((void**)&dA, bytesA);
+//     cudaMalloc((void**)&dB, bytesB);
+//     cudaMalloc((void**)&dC, bytesC);
+
+//     // Copy inputs to device
+//     cudaMemcpy(dA, hA_rowmajor, bytesA, cudaMemcpyHostToDevice);
+//     cudaMemcpy(dB, hB_colmajor, bytesB, cudaMemcpyHostToDevice);
+
+//     // Launch your kernel
+//     dim3 blockDim(256, 1, 1);  // adjust if your kernel uses different config
+//     dim3 gridDim((K + 63) / 64, (M + 63) / 64, 1);
+//     wmma_gemm_kernel_tc_shared<<<gridDim, blockDim>>>(dA, dB, dC, M, N, K);
+
+//     // Copy result back to host
+//     cudaMemcpy(hC_rowmajor, dC, bytesC, cudaMemcpyDeviceToHost);
+
+//     // Free device memory
+//     cudaFree(dA);
+//     cudaFree(dB);
+//     cudaFree(dC);
+// }
+
+// // Wrapper for Python that takes HOST arrays and internally manages device memory
+// extern "C"
+// void naive_tensor_tgemm_host(const half* hA_rowmajor,
+//                              const half* hB_colmajor,
+//                              float* hC_rowmajor,
+//                              int M, int K, int N)
+// {
+//     half *dA, *dB;
+//     float *dC;
+
+//     size_t bytesA = (size_t)M * (size_t)N * sizeof(half);
+//     size_t bytesB = (size_t)N * (size_t)K * sizeof(half);
+//     size_t bytesC = (size_t)M * (size_t)K * sizeof(float);
+
+//     // Allocate device buffers
+//     cudaMalloc((void**)&dA, bytesA);
+//     cudaMalloc((void**)&dB, bytesB);
+//     cudaMalloc((void**)&dC, bytesC);
+
+//     // Copy host → device
+//     cudaMemcpy(dA, hA_rowmajor, bytesA, cudaMemcpyHostToDevice);
+//     cudaMemcpy(dB, hB_colmajor, bytesB, cudaMemcpyHostToDevice);
+
+//     // Call your existing device-pointer version
+//     naive_tensor_tgemm(dA, dB, dC, M, K, N);
+
+//     // Copy device → host
+//     cudaMemcpy(hC_rowmajor, dC, bytesC, cudaMemcpyDeviceToHost);
+
+//     // Free device memory
+//     cudaFree(dA);
+//     cudaFree(dB);
+//     cudaFree(dC);
+// }

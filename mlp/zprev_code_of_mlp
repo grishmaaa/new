@@ -1,0 +1,562 @@
+# #import numpy as np
+
+# class MLP:
+#     def __init__(self, input_size, hidden_layers, output_size, 
+#                  weight_initialization='random', activation_func='relu', 
+#                  learning_rate=0.01):
+        
+#         self.input_size = input_size
+#         self.hidden_layers = hidden_layers
+#         self.output_size = output_size
+#         self.layer_sizes = [self.input_size] + self.hidden_layers + [self.output_size]
+        
+     
+#         self.weight_initialization = weight_initialization
+#         self.activation_func = activation_func
+#         self.learning_rate = learning_rate
+
+#         self.weights = []
+#         self.biases = []
+#         self._initialize_parameters()
+
+#         print("MLP initialized successfully!")
+#         print(f"Network Architecture: {self.layer_sizes}")
+
+#     def _initialize_parameters(self):
+#         for i in range(len(self.layer_sizes) - 1):
+#             input_dim = self.layer_sizes[i]
+#             output_dim = self.layer_sizes[i+1]
+
+#             if self.weight_initialization == 'random':
+#                 weight_matrix = np.random.randn(output_dim, input_dim) * 0.01
+#             else:
+#                 weight_matrix = np.random.randn(output_dim, input_dim) * 0.01
+            
+#             self.weights.append(weight_matrix)
+
+#             bias_vector = np.zeros((output_dim, 1))
+#             self.biases.append(bias_vector)
+            
+#         print("Weights and biases initialized.")
+
+#     def forward(self, x):
+#         print("\n--- Forward Pass (to be implemented) ---")
+#         pass
+
+# if __name__ == '__main__':
+#     from sklearn.datasets import make_moons
+#     from sklearn.model_selection import train_test_split
+
+ 
+#     X, y = make_moons(n_samples=500, noise=0.2, random_state=42)
+#     y = y.reshape(1, -1)
+    
+#     X_train, X_test, y_train, y_test = train_test_split(X, y.T, test_size=0.2, random_state=42)
+#     X_train, X_test, y_train, y_test = X_train.T, X_test.T, y_train.T, y_test.T
+
+#     print(f"Training data shape: X={X_train.shape}, y={y_train.shape}")
+#     print(f"Test data shape:     X={X_test.shape}, y={y_test.shape}")
+
+#     mlp = MLP(
+#         input_size=2, 
+#         hidden_layers=[10, 7, 5], 
+#         output_size=1,
+#         weight_initialization='random',
+#         activation_func='relu',
+#         learning_rate=0.05
+#     )
+
+#     costs = mlp.train(X_train, y_train, epochs=250, print_cost_every=25)
+
+#     predictions = mlp.predict(X_test)
+#     accuracy = np.mean(predictions == y_test) * 100
+#     print(f"\nTest Accuracy: {accuracy:.2f}%")
+
+
+#     # print("Creating an MLP instance...")
+    
+
+#     # input_features = 2
+#     # hidden_config = [3, 3]
+#     # output_classes = 1
+
+#     # mlp = MLP(
+#     #     input_size=input_features,
+#     #     hidden_layers=hidden_config,
+#     #     output_size=output_classes,
+#     #     weight_initialization='random',
+#     #     activation_func='relu',
+#     #     learning_rate=0.01
+#     # )
+#     # print("MLP instance created with the following parameters:")
+#     # print(f"  - Input Size: {mlp.input_size}")
+#     # print(f"  - Hidden Layers: {mlp.hidden_layers}")
+#     # print(f"  - Output Size: {mlp.output_size}")
+#     # print(f"  - Weight Initialization: {mlp.weight_initialization}")
+#     # print(f"  - Activation Function: {mlp.activation_func}")
+#     # print("\n--- Inspected Parameters ---")
+#     # for i, (w, b) in enumerate(zip(mlp.weights, mlp.biases)):
+#     #     print(f"Layer {i+1}:")
+#     #     print(f"  Weights shape: {w.shape}")
+#     #     print(f"  Biases shape: {b.shape}")
+
+#     # print("MLP instance created successfully!")
+    
+#     # costs = mlp.train(X_train, y_train, epochs=250, print_cost_every=25)
+
+#     # predictions = mlp.predict(X_test)
+#     # accuracy = np.mean(predictions == y_test) * 100
+#     # print(f"\nTest Accuracy: {accuracy:.2f}%")
+
+###########################
+# 
+#  import numpy as np
+
+# class MLP:
+#     """
+#     A simple Multi-Layer Perceptron class.
+#     """
+
+#     def __init__(self, input_size, hidden_layers, output_size, 
+#                  weight_initialization='random', activation_func='relu', 
+#                  learning_rate=0.01):
+#         """
+#         Initializes the Multi-Layer Perceptron.
+
+#         Args:
+#             input_size (int): The number of neurons in the input layer (features).
+#             hidden_layers (list of int): A list where each element is the number 
+#                                          of neurons in a hidden layer.
+#             output_size (int): The number of neurons in the output layer.
+#             weight_initialization (str): Method for initializing weights. 
+#                                          (Currently 'random').
+#             activation_func (str): The activation function to use for hidden layers.
+#                                    (Currently 'relu').
+#             learning_rate (float): The step size for updating weights during training.
+#         """
+#         # Store network architecture
+#         self.input_size = input_size
+#         self.hidden_layers = hidden_layers
+#         self.output_size = output_size
+#         self.layer_sizes = [self.input_size] + self.hidden_layers + [self.output_size]
+        
+#         # Store hyperparameters
+#         self.weight_initialization = weight_initialization
+#         self.activation_func = activation_func
+#         self.learning_rate = learning_rate
+
+#         # Initialize weights and biases
+#         self.weights = []
+#         self.biases = []
+#         self._initialize_parameters()
+
+#         print("MLP initialized successfully!")
+#         print(f"Network Architecture: {self.layer_sizes}")
+
+#     def _initialize_parameters(self):
+#         """
+#         Initializes the weights and biases for the network based on the chosen method.
+#         """
+#         # np.random.seed(42) # Uncomment for reproducible results
+        
+#         # Iterate from the first hidden layer to the output layer
+#         for i in range(len(self.layer_sizes) - 1):
+#             # The number of incoming connections (from the previous layer)
+#             input_dim = self.layer_sizes[i]
+#             # The number of outgoing connections (to the current layer)
+#             output_dim = self.layer_sizes[i+1]
+
+#             # Initialize weights
+#             if self.weight_initialization == 'random':
+#                 # Small random values to break symmetry
+#                 # Multiplying by 0.01 to keep the initial outputs small
+#                 weight_matrix = np.random.randn(output_dim, input_dim) * 0.01
+#             # --- Other initialization methods like 'xavier' or 'he' can be added here ---
+#             else:
+#                 # Default to random if the specified method is not recognized
+#                 weight_matrix = np.random.randn(output_dim, input_dim) * 0.01
+            
+#             self.weights.append(weight_matrix)
+
+#             # Initialize biases with zeros
+#             bias_vector = np.zeros((output_dim, 1))
+#             self.biases.append(bias_vector)
+            
+#         print("Weights and biases initialized.")
+
+#     def forward(self, x):
+#         """
+#         Performs the forward pass through the network.
+#         (This is a placeholder and will be implemented next)
+        
+#         Args:
+#             x (np.ndarray): The input data. Shape: (input_size, number_of_examples)
+
+#         Returns:
+#             np.ndarray: The output of the network.
+#         """
+#         print("\n--- Forward Pass (to be implemented) ---")
+#         # --- Activation function logic will go here ---
+#         # --- Matrix multiplication and addition will go here ---
+#         pass
+
+# # --- Example of how to call the class ---
+# if __name__ == '__main__':
+#     print("Creating an MLP instance...")
+    
+#     # Define the network structure
+#     # Input layer with 2 features
+#     # Two hidden layers, each with 3 neurons
+#     # Output layer with 1 neuron
+#     input_features = 2
+#     hidden_config = [3, 3]
+#     output_classes = 1
+
+#     # Instantiate the MLP
+#     mlp = MLP(
+#         input_size=input_features,
+#         hidden_layers=hidden_config,
+#         output_size=output_classes,
+#         weight_initialization='random',
+#         activation_func='relu',
+#         learning_rate=0.01
+#     )
+
+#     # You can inspect the initialized weights and biases
+#     print("\n--- Inspected Parameters ---")
+#     for i, (w, b) in enumerate(zip(mlp.weights, mlp.biases)):
+#         print(f"Layer {i+1}:")
+#         print(f"  Weights shape: {w.shape}")
+#         print(f"  Biases shape: {b.shape}")
+
+#     print("MLP instance created successfully!")
+
+
+#######################################################################
+# import numpy as np
+# import time
+# # Make sure you have these files in the same directory
+# from ActivationFunctions import ActivationFunction
+# from WeightInitialization import WeightInitializer
+# from LossFunctions import LossFunction
+
+# class MLP:
+#     """
+#     A Multi-Layer Perceptron class with a full training pipeline.
+#     """
+
+#     def __init__(self, input_size, hidden_layers, output_size, 
+#                  weight_initialization='he_normal', activation_func='relu', 
+#                  loss_function='binary_cross_entropy_loss', learning_rate=0.01):
+#         """
+#         Initializes the MLP.
+        
+#         Args:
+#             input_size (int): Number of input features.
+#             hidden_layers (list of int): List of neuron counts for each hidden layer.
+#             output_size (int): Number of output neurons.
+#             weight_initialization (str): 'random', 'xavier', or 'he'.
+#             activation_func (str): 'relu', 'sigmoid', or 'tanh' for hidden layers.
+#             loss_function (str): 'binary_crossentropy' or 'categorical_crossentropy'.
+#             learning_rate (float): The learning rate for gradient descent.
+#         """
+#         # --- Store Architecture and Hyperparameters ---
+#         self.layer_sizes = [input_size] + hidden_layers + [output_size]
+#         self.num_layers = len(self.layer_sizes)
+#         self.learning_rate = learning_rate
+#         self.weight_init_method = weight_initialization
+#         self.activation_func_name = activation_func
+#         self.loss_func_name = loss_function
+
+#         # --- Set Methods from String Names ---
+#         self._set_activation_functions()
+#         self._set_loss_function()
+
+#         # --- Initialize Network Parameters ---
+#         self.weights = []
+#         self.biases = []
+#         self._initialize_parameters()
+        
+#         # --- Placeholders for Training ---
+#         self.cache = {}
+#         self.grads = {}
+
+#         print("MLP initialized successfully.")
+#         print(f"  - Architecture: {self.layer_sizes}")
+#         print(f"  - Hidden Activation: {self.activation_func_name}")
+#         print(f"  - Weight Initialization: {self.weight_init_method}")
+#         print(f"  - Loss Function: {self.loss_func_name}")
+
+#     def _set_activation_functions(self):
+#         """Sets the activation functions based on the string name."""
+#         activations = {
+#             'relu': (ActivationFunction.relu, ActivationFunction.relu_derivative),
+#             'sigmoid': (ActivationFunction.sigmoid, ActivationFunction.sigmoid_derivative),
+#             'tanh': (ActivationFunction.tanh, ActivationFunction.tanh_derivative),
+#             'leaky_relu': (ActivationFunction.leaky_relu, ActivationFunction.leaky_relu_derivative),
+#             'softmax': (ActivationFunction.softmax, ActivationFunction.softmax_derivative),
+#             'elu': (ActivationFunction.elu, ActivationFunction.elu_derivative),
+#             'swish': (ActivationFunction.swish, ActivationFunction.swish_derivative),
+#             'softplus': (ActivationFunction.softplus, ActivationFunction.softplus_derivative)
+#         }
+#         if self.activation_func_name not in activations:
+#             raise ValueError("Unsupported activation function.")
+#         self.hidden_activation, self.hidden_activation_derivative = activations[self.activation_func_name]
+        
+#         # Output activation is determined by the task (loss function)
+#         if self.loss_func_name == 'binary_cross_entropy_loss':
+#             self.output_activation = ActivationFunction.sigmoid
+#             self.output_activation_derivative = ActivationFunction.sigmoid_derivative
+#         elif self.loss_func_name == 'categorical_cross_entropy_loss':
+#             self.output_activation = ActivationFunction.softmax
+#         else: # Default for other cases
+#             self.output_activation = ActivationFunction.sigmoid
+
+#     def _set_loss_function(self):
+#         """Sets the loss function based on the string name."""
+#         losses = {
+#             'binary_cross_entropy_loss': (LossFunction.binary_cross_entropy_loss, LossFunction.binary_cross_entropy_gradient),
+#             'categorical_cross_entropy_loss': (LossFunction.categorical_cross_entropy_loss, None), # Derivative is special case
+#             'mean_squared_error': (LossFunction.mean_squared_error, LossFunction.mean_squared_error_gradient),
+#             'hinge_loss': (LossFunction.hinge_loss, LossFunction.hinge_loss_gradient),
+#             'cross_entropy_loss': (LossFunction.cross_entropy_loss, LossFunction.cross_entropy_gradient),
+#             'mean_absolute_error': (LossFunction.mean_absolute_error, LossFunction.mean_absolute_error_gradient)
+#             # Add more loss functions here as needed
+#         }
+#         if self.loss_func_name not in losses:
+#             raise ValueError("Unsupported loss function.")
+#         self.cost, self.cost_derivative = losses[self.loss_func_name]
+
+#     def _initialize_parameters(self):
+#         """Initializes weights and biases."""
+#         initializers = {
+#             'random_normal': WeightInitializer.random_normal,
+#             'random_uniform': WeightInitializer.random_uniform,
+#             'xavier_uniform': WeightInitializer.xavier_uniform,
+#             'xavier_normal': WeightInitializer.xavier_normal,
+#             'he_uniform': WeightInitializer.he_uniform,
+#             'he_normal': WeightInitializer.he_normal,
+#             'zero': WeightInitializer.zero,
+#             'constant': WeightInitializer.constant,
+#             'lecun_uniform': WeightInitializer.lecun_uniform,
+#             'lecun_normal': WeightInitializer.lecun_normal,
+#             # 'xavier': WeightInitializer.xavier,
+#             # 'he': WeightInitializer.he
+#         }
+#         if self.weight_init_method not in initializers:
+#             raise ValueError("Unsupported weight initialization.")
+#         initializer = initializers[self.weight_init_method]
+
+#         for i in range(1, self.num_layers):
+#             input_dim, output_dim = self.layer_sizes[i-1], self.layer_sizes[i]
+#             self.weights.append(initializer(input_dim, output_dim))
+#             self.biases.append(np.zeros((output_dim, 1)))
+
+#     def forward(self, X):
+#         """Performs the forward pass."""
+#         self.cache = {'A0': X}
+#         A = X
+#         for l in range(1, self.num_layers):
+#             A_prev = A
+#             W, b = self.weights[l-1], self.biases[l-1]
+#             Z = np.dot(W, A_prev) + b
+            
+#             activation = self.hidden_activation if l < self.num_layers - 1 else self.output_activation
+#             A = activation(Z)
+            
+#             self.cache[f'A{l}'], self.cache[f'Z{l}'] = A, Z
+#         return A
+
+#     def backward(self, Y):
+#         """Performs backpropagation to compute gradients."""
+#         m = Y.shape[1]
+#         L = self.num_layers - 1
+#         AL = self.cache[f'A{L}']
+
+#         # --- Initial Gradient Calculation (Output Layer) ---
+#         if self.loss_func_name == 'categorical_cross_entropy_loss':
+#             # Special case for Softmax + CCE loss derivative
+#             dZ = AL - Y
+#         else:
+#             dAL = self.cost_derivative(Y, AL)
+#             dZ = dAL * self.output_activation_derivative(self.cache[f'Z{L}'])
+
+#         A_prev = self.cache[f'A{L-1}']
+#         self.grads[f'dW{L}'] = (1/m) * np.dot(dZ, A_prev.T)
+#         self.grads[f'db{L}'] = (1/m) * np.sum(dZ, axis=1, keepdims=True)
+#         dAPrev = np.dot(self.weights[L-1].T, dZ)
+
+#         # --- Loop Backwards Through Hidden Layers ---
+#         for l in reversed(range(1, L)):
+#             dZ = dAPrev * self.hidden_activation_derivative(self.cache[f'Z{l}'])
+#             A_prev = self.cache[f'A{l-1}']
+#             self.grads[f'dW{l}'] = (1/m) * np.dot(dZ, A_prev.T)
+#             self.grads[f'db{l}'] = (1/m) * np.sum(dZ, axis=1, keepdims=True)
+#             dAPrev = np.dot(self.weights[l-1].T, dZ)
+
+#     def update_parameters(self):
+#         """Updates weights and biases using gradient descent."""
+#         for l in range(1, self.num_layers):
+#             self.weights[l-1] -= self.learning_rate * self.grads[f'dW{l}']
+#             self.biases[l-1] -= self.learning_rate * self.grads[f'db{l}']
+
+#     def train(self, X, Y, epochs, print_cost_every=100):
+#         """
+#         Trains the network for a specified number of epochs.
+#         """
+#         print(f"\n--- Starting Training for {epochs} epochs ---")
+#         start_time = time.time()
+#         costs = []
+
+#         for i in range(epochs):
+#             # Forward -> Backward -> Update
+#             AL = self.forward(X)
+#             self.backward(Y)
+#             self.update_parameters()
+            
+#             # Record and print cost
+#             if i % print_cost_every == 0 or i == epochs - 1:
+#                 cost = self.cost(Y, AL)
+#                 costs.append(cost)
+#                 print(f"Epoch {i: >4} | Cost: {cost:.6f}")
+        
+#         end_time = time.time()
+#         print(f"--- Training finished in {end_time - start_time:.2f} seconds ---")
+#         return costs
+
+#     def predict(self, X):
+#         """Makes predictions for a given input X."""
+#         AL = self.forward(X)
+#         if self.loss_func_name == 'binary_crossentropy':
+#             return (AL > 0.5).astype(int)
+#         elif self.loss_func_name == 'categorical_crossentropy':
+#             return np.argmax(AL, axis=0)
+#         return AL
+
+# # --- Example of how to call the class ---
+# if __name__ == '__main__':
+#     # Using sklearn to generate a simple dataset for demonstration
+#     from sklearn.datasets import make_moons
+#     from sklearn.model_selection import train_test_split
+
+#     # Generate data
+#     X, y = make_moons(n_samples=500, noise=0.2, random_state=42)
+#     # Reshape y to be a row vector (1, n_samples)
+#     y = y.reshape(1, -1)
+    
+#     # Split data and transpose features to match network's expected input shape
+#     X_train, X_test, y_train, y_test = train_test_split(X, y.T, test_size=0.2, random_state=42)
+#     X_train, X_test, y_train, y_test = X_train.T, X_test.T, y_train.T, y_test.T
+
+#     print(f"Training data shape: X={X_train.shape}, y={y_train.shape}")
+#     print(f"Test data shape:     X={X_test.shape}, y={y_test.shape}")
+
+#     # --- Instantiate and Train the MLP ---
+#     # All parameters are now simple strings
+#     mlp = MLP(
+#         input_size=2, 
+#         hidden_layers=[10, 7, 5], 
+#         output_size=1,
+#         weight_initialization='he_normal',
+#         activation_func='relu',
+#         loss_function='binary_cross_entropy_loss',
+#         learning_rate=0.05
+#     )
+
+#     # Train the model
+#     costs = mlp.train(X_train, y_train, epochs=250, print_cost_every=25)
+
+#     # --- Evaluate the Model ---
+#     predictions = mlp.predict(X_test)
+#     accuracy = np.mean(predictions == y_test) * 100
+#     print(f"\nTest Accuracy: {accuracy:.2f}%")
+
+    # predictions = mlp.predict(X_test)
+    # predictions = predictions.reshape(-1)
+    # y_test = y_test.reshape(-1)
+    # accuracy = np.mean(predictions == y_test) * 100
+    # print(f"\nTest Accuracy: {accuracy:.3f}%")
+
+
+#######################################    BENCHMARK.PY   ###################################################################3
+
+# import os
+# os.environ.setdefault("OMP_NUM_THREADS", "8")          # tune: set to your CPU cores
+# os.environ.setdefault("MKL_NUM_THREADS", "8")
+# os.environ.setdefault("TF_NUM_INTRAOP_THREADS", "8")
+# os.environ.setdefault("TF_NUM_INTEROP_THREADS", "1")
+# os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "1")    # keep TF optimized; set to "0" to disable
+
+# try:
+#     import torch
+#     torch.set_num_threads(int(os.environ["OMP_NUM_THREADS"]))
+#     torch.set_num_interop_threads(1)
+# except Exception:
+#     pass
+
+####################################################################
+    # --- Save your trained MLP weights for later inference ---
+    # _m = UserMLP  # the trained instance
+
+    # import numpy as np
+    # input_dim  = _m.weights[0].shape[1]
+    # layer_outs = [W.shape[0] for W in _m.weights]
+    # layer_sizes = [input_dim] + layer_outs
+
+    # np.savez(
+    #     "mymlp_weights.npz",
+    #     layer_sizes=np.array(layer_sizes, dtype=np.int64),
+    #     weights=np.array([W for W in _m.weights], dtype=object),
+    #     biases=np.array([b for b in _m.biases], dtype=object),
+    #     activation_func=_m.activation_func_name,
+    #     loss_func=_m.loss_func_name,
+    # )
+    # print("Weights saved to mymlp_weights.npz")
+
+
+    # # --- Save your trained MLP weights for later inference ---
+    # # Use the *instance*, not the class.
+    # _m = UserMLP
+
+    # # Robustly derive layer sizes from weight shapes, even if .layer_sizes is not defined
+    # input_dim  = _m.weights[0].shape[1]
+    # layer_outs = [W.shape[0] for W in _m.weights]   # each Linear's out_dim
+    # layer_sizes = [input_dim] + layer_outs          # e.g., [784, 128, 64, 10]
+
+    # # Be tolerant if attribute names differ
+    # act_name  = getattr(_m, "activation_func_name", getattr(_m, "activation", "relu"))
+    # loss_name = getattr(_m, "loss_func_name",       getattr(_m, "loss_function", "cross_entropy_loss"))
+
+    # import numpy as np
+    # np.savez(
+    #     "mymlp_weights.npz",
+    #     layer_sizes=np.array(layer_sizes, dtype=np.int64),
+    #     # keep lists as object arrays so shapes can differ per layer
+    #     weights=np.array([W for W in _m.weights], dtype=object),
+    #     biases=np.array([b for b in _m.biases], dtype=object),
+    #     activation_func=act_name,
+    #     loss_func=loss_name,
+    # )
+    # print("Weights saved to mymlp_weights.npz")
+
+######################################################################################
+
+
+# def run_user_mlp(X_train, Y_train_oh, X_test, y_test_int, hidden, lr, epochs, seed):
+#     hidden_layers = [int(h) for h in (hidden.split(",") if isinstance(hidden, str) else hidden) if h.strip()]
+#     model = UserMLP(
+#         input_size=784,
+#         hidden_layers=hidden_layers,
+#         output_size=10,
+#         weight_initialization='he_normal',
+#         activation_func='relu',
+#         loss_function='cross_entropy_loss',
+#         learning_rate=lr
+#     )
+#     t0 = time.time()
+#     model.train(X_train, Y_train_oh, epochs=epochs, print_cost_every=max(1, epochs//5))
+#     train_time = time.time() - t0
+
+#     user_pred = model.predict(X_test)  # can be (C,m) or (m,)
+#     acc = accuracy_from_user_pred(user_pred, y_test_int)
+#     return train_time, acc
