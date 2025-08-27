@@ -258,29 +258,328 @@ class Tensor:
                 self.grad += self._unbroadcast(out.grad * grad_val, self.shape)
         out._backward = _bw
         return out
-
     # ------------------------------
-    # Full Test Suite
+    # Full Test Suite (Drop-in)
     # ------------------------------
     @staticmethod
-    def run_tests():
-        print("--- Running Tests ---")
-        
-        # Test basic tensor creation and printing
-        print("\nTest 1: Tensor Initialization")
-        x = Tensor([[1, 2], [3,  4]], requires_grad=True)
-        print(x)
-        
-        # Test a simple forward pass
-        print("\nTest 2: Forward Pass (x * 2 + 1)")
-        y = x * 2 + 1
-        print(y)
-        
-        # Test backward pass
-        print("\nTest 3: Backward Pass")
-        y.backward(grad=np.array([[1,1], [1,1]]))
-        print("x.grad:")
-        print(x.grad)
+    def run_tests(verbose: bool = False):
+        """
+        Runs a suite of forward/grad & property tests with tabular output.
+        Uses only stdlib + NumPy. No extra deps.
+        """
+        import time
+        import math
+        rng = np.random.default_rng(42)
+
+        # ---------- small pretty table printer ----------
+        def _table(headers, rows, title=None):
+            col_widths = [len(h) for h in headers]
+            for r in rows:
+                for j, cell in enumerate(r):
+                    col_widths[j] = max(col_widths[j], len(str(cell)))
+            def sep(ch='-'):
+                return '+' + '+'.join(ch * (w + 2) for w in col_widths) + '+'
+            def row(vals):
+                return '| ' + ' | '.join(f"{str(v):<{w}}" for v, w in zip(vals, col_widths)) + ' |'
+            if title:
+                print(title)
+            print(sep('-'))
+            print(row(headers))
+            print(sep('='))
+            for r in rows:
+                print(row(r))
+            print(sep('-'))
+
+        def _fmt_bool(b):
+            return "PASS" if b else "FAIL"
+
+        def _cmp_arrays(a, b, rtol=1e-6, atol=1e-8):
+            diff = np.asarray(a) - np.asarray(b)
+            max_abs = float(np.max(np.abs(diff))) if diff.size else 0.0
+            ok = np.allclose(a, b, rtol=rtol, atol=atol)
+            return ok, max_abs
+
+        def _finite_diff_grad(f_builder: Callable[[Tensor], Tensor],
+                              x_np: np.ndarray,
+                              eps: float = 1e-6) -> np.ndarray:
+            """
+            Compute finite-difference gradient of scalar function:
+            f(x) = sum( f_builder(Tensor(x)).data )
+            """
+            grad = np.zeros_like(x_np, dtype=np.float64)
+            flat = x_np.reshape(-1)
+            for i in range(flat.size):
+                orig = flat[i]
+                flat[i] = orig + eps
+                y_plus  = f_builder(Tensor(x_np.copy())).data.sum()
+                flat[i] = orig - eps
+                y_minus = f_builder(Tensor(x_np.copy())).data.sum()
+                flat[i] = orig
+                grad.reshape(-1)[i] = (y_plus - y_minus) / (2 * eps)
+            return grad
+
+        # ---------- registry of tests ----------
+        results = []  # for summary table
+        details = []  # per-failure details
+
+        def record(name, f_ok, g_ok, f_err, g_err, secs, notes=""):
+            results.append([name, _fmt_bool(f_ok), _fmt_bool(g_ok),
+                            f"{f_err:.3e}", f"{g_err:.3e}", f"{secs*1e3:.1f} ms", notes])
+
+        # ===== Test 1: add (no broadcast) =====
+        def test_add_basic():
+            name = "add/basic"
+            x_np = rng.normal(size=(2, 3))
+            y_np = rng.normal(size=(2, 3))
+            x = Tensor(x_np, requires_grad=True, name="x")
+            y = Tensor(y_np, requires_grad=True, name="y")
+            t0 = time.time()
+            out = x + y
+            upstream = np.ones_like(out.data)
+            out.backward(grad=upstream)
+            f_ok, f_err = _cmp_arrays(out.data, x_np + y_np)
+            g_ok1, g1_err = _cmp_arrays(x.grad, upstream)
+            g_ok2, g2_err = _cmp_arrays(y.grad, upstream)
+            g_ok = g_ok1 and g_ok2
+            g_err = max(g1_err, g2_err)
+            secs = time.time() - t0
+            if not (f_ok and g_ok) and verbose:
+                details.append((
+                    name,
+                    ("forward", out.data, x_np + y_np),
+                    ("grad_x", x.grad, upstream),
+                    ("grad_y", y.grad, upstream),
+                ))
+            record(name, f_ok, g_ok, f_err, g_err, secs)
+
+        # ===== Test 2: add (broadcast) =====
+        def test_add_broadcast():
+            name = "add/broadcast"
+            x_np = rng.normal(size=(2, 3))
+            b_np = rng.normal(size=(1, 3))
+            x = Tensor(x_np, requires_grad=True, name="x")
+            b = Tensor(b_np, requires_grad=True, name="b")
+            t0 = time.time()
+            out = x + b
+            upstream = np.ones_like(out.data)
+            out.backward(grad=upstream)
+            f_ok, f_err = _cmp_arrays(out.data, x_np + b_np)
+            # grads
+            dx_expect = upstream         # (2,3)
+            db_expect = upstream.sum(axis=0, keepdims=True)  # (1,3)
+            g_ok1, g1_err = _cmp_arrays(x.grad, dx_expect)
+            g_ok2, g2_err = _cmp_arrays(b.grad, db_expect)
+            g_ok = g_ok1 and g_ok2
+            g_err = max(g1_err, g2_err)
+            secs = time.time() - t0
+            if not (f_ok and g_ok) and verbose:
+                details.append((
+                    name,
+                    ("forward", out.data, x_np + b_np),
+                    ("grad_x", x.grad, dx_expect),
+                    ("grad_b", b.grad, db_expect),
+                ))
+            record(name, f_ok, g_ok, f_err, g_err, secs, notes="Broadcast axis=0")
+
+        # ===== Test 3: mul (no broadcast) =====
+        def test_mul_basic():
+            name = "mul/basic"
+            x_np = rng.normal(size=(2, 3))
+            y_np = rng.normal(size=(2, 3))
+            x = Tensor(x_np, requires_grad=True, name="x")
+            y = Tensor(y_np, requires_grad=True, name="y")
+            t0 = time.time()
+            out = x * y
+            upstream = np.ones_like(out.data)
+            out.backward(grad=upstream)
+            f_ok, f_err = _cmp_arrays(out.data, x_np * y_np)
+            dx_expect = upstream * y_np
+            dy_expect = upstream * x_np
+            g_ok1, g1_err = _cmp_arrays(x.grad, dx_expect)
+            g_ok2, g2_err = _cmp_arrays(y.grad, dy_expect)
+            g_ok = g_ok1 and g_ok2
+            g_err = max(g1_err, g2_err)
+            secs = time.time() - t0
+            if not (f_ok and g_ok) and verbose:
+                details.append((
+                    name,
+                    ("forward", out.data, x_np * y_np),
+                    ("grad_x", x.grad, dx_expect),
+                    ("grad_y", y.grad, dy_expect),
+                ))
+            record(name, f_ok, g_ok, f_err, g_err, secs)
+
+        # ===== Test 4: mul (broadcast) =====
+        def test_mul_broadcast():
+            name = "mul/broadcast"
+            x_np = rng.normal(size=(2, 3))
+            b_np = rng.normal(size=(1, 3))
+            x = Tensor(x_np, requires_grad=True, name="x")
+            b = Tensor(b_np, requires_grad=True, name="b")
+            t0 = time.time()
+            out = x * b
+            upstream = np.ones_like(out.data)
+            out.backward(grad=upstream)
+            f_ok, f_err = _cmp_arrays(out.data, x_np * b_np)
+            dx_expect = upstream * b_np
+            db_expect = (upstream * x_np).sum(axis=0, keepdims=True)
+            g_ok1, g1_err = _cmp_arrays(x.grad, dx_expect)
+            g_ok2, g2_err = _cmp_arrays(b.grad, db_expect)
+            g_ok = g_ok1 and g_ok2
+            g_err = max(g1_err, g2_err)
+            secs = time.time() - t0
+            if not (f_ok and g_ok) and verbose:
+                details.append((
+                    name,
+                    ("forward", out.data, x_np * b_np),
+                    ("grad_x", x.grad, dx_expect),
+                    ("grad_b", b.grad, db_expect),
+                ))
+            record(name, f_ok, g_ok, f_err, g_err, secs, notes="Broadcast axis=0")
+
+        # ===== Test 5: power (elementwise) =====
+        def test_pow3():
+            name = "pow/^3"
+            x_np = rng.normal(size=(2, 3))
+            x = Tensor(x_np, requires_grad=True, name="x")
+            p = 3.0
+            t0 = time.time()
+            out = x ** p
+            upstream = np.ones_like(out.data)
+            out.backward(grad=upstream)
+            f_ok, f_err = _cmp_arrays(out.data, x_np ** p)
+            dx_expect = upstream * (p * (x_np ** (p - 1)))
+            g_ok, g_err = _cmp_arrays(x.grad, dx_expect)
+            secs = time.time() - t0
+            if not (f_ok and g_ok) and verbose:
+                details.append((
+                    name,
+                    ("forward", out.data, x_np ** p),
+                    ("grad_x", x.grad, dx_expect),
+                ))
+            record(name, f_ok, g_ok, f_err, g_err, secs)
+
+        # ===== Test 6: chain rule ( (3x+2) * (x^2) ) =====
+        def test_chain_poly():
+            name = "chain/(3x+2)*x^2"
+            x_np = rng.normal(size=(2, 3))
+            x = Tensor(x_np, requires_grad=True, name="x")
+            t0 = time.time()
+            out = (x * 3.0 + 2.0) * (x ** 2.0)
+            upstream = np.ones_like(out.data)
+            out.backward(grad=upstream)
+            f_ok, f_err = _cmp_arrays(out.data, (3.0 * x_np + 2.0) * (x_np ** 2.0))
+            # d/dx [(3x+2)*x^2] = 3*x^2 + (3x+2)*2x
+            dx_expect = 3.0 * (x_np ** 2.0) + (3.0 * x_np + 2.0) * (2.0 * x_np)
+            g_ok, g_err = _cmp_arrays(x.grad, dx_expect)
+            secs = time.time() - t0
+            if not (f_ok and g_ok) and verbose:
+                details.append((
+                    name,
+                    ("forward", out.data, (3.0 * x_np + 2.0) * (x_np ** 2.0)),
+                    ("grad_x", x.grad, dx_expect),
+                ))
+            record(name, f_ok, g_ok, f_err, g_err, secs, notes="Product rule check")
+
+        # ===== Test 7: scalar * tensor grad =====
+        def test_scalar_mul_grad():
+            name = "scalar*tensor grad"
+            x_np = rng.normal(size=(2, 3))
+            k = 7.5
+            x = Tensor(x_np, requires_grad=True, name="x")
+            t0 = time.time()
+            out = k * x
+            upstream = np.ones_like(out.data)
+            out.backward(grad=upstream)
+            f_ok, f_err = _cmp_arrays(out.data, k * x_np)
+            dx_expect = upstream * k
+            g_ok, g_err = _cmp_arrays(x.grad, dx_expect)
+            secs = time.time() - t0
+            if not (f_ok and g_ok) and verbose:
+                details.append((name, ("forward", out.data, k * x_np), ("grad_x", x.grad, dx_expect)))
+            record(name, f_ok, g_ok, f_err, g_err, secs)
+
+        # ===== Test 8: properties (commutativity, distributivity) =====
+        def test_properties():
+            name = "algebraic properties"
+            a_np = rng.normal(size=(2, 3))
+            b_np = rng.normal(size=(2, 3))
+            c_np = rng.normal(size=(2, 3))
+            a = Tensor(a_np); b = Tensor(b_np); c = Tensor(c_np)
+            t0 = time.time()
+            # (a + b) == (b + a)
+            ok1, e1 = _cmp_arrays((a + b).data, (b + a).data)
+            # (a * b) == (b * a)
+            ok2, e2 = _cmp_arrays((a * b).data, (b * a).data)
+            # a*(b + c) == a*b + a*c
+            ok3, e3 = _cmp_arrays((a * (b + c)).data, (a * b + a * c).data)
+            ok = ok1 and ok2 and ok3
+            emax = max(e1, e2, e3)
+            secs = time.time() - t0
+            if not ok and verbose:
+                details.append((name,
+                                ("comm add", (a + b).data, (b + a).data),
+                                ("comm mul", (a * b).data, (b * a).data),
+                                ("distrib",   (a * (b + c)).data, (a * b + a * c).data)))
+            record(name, ok, True, emax, 0.0, secs, notes="Commutativity + Distributivity")
+
+        # ===== Test 9: finite-difference grad check =====
+        def test_finite_diff():
+            name = "finite-diff grad check"
+            x_np = rng.normal(size=(2, 3))
+            # define f(T) = sum( (T*2 + 1) ** 3 )  (scalarized by sum)
+            def f_builder(T):
+                return (T * 2.0 + 1.0) ** 3.0
+            # autodiff
+            x = Tensor(x_np.copy(), requires_grad=True, name="x")
+            t0 = time.time()
+            y = f_builder(x)
+            y.backward(grad=np.ones_like(y.data))
+            grad_auto = x.grad
+            # finite diff
+            grad_fd = _finite_diff_grad(f_builder, x_np.copy(), eps=1e-6)
+            secs = time.time() - t0
+            g_ok, g_err = _cmp_arrays(grad_auto, grad_fd, rtol=1e-5, atol=1e-6)
+            if not g_ok and verbose:
+                details.append((name, ("grad_auto", grad_auto, "grad_fd", grad_fd)))
+            # forward equivalence is trivial here (we didn't compare out.data), mark as True
+            record(name, True, g_ok, 0.0, g_err, secs, notes="eps=1e-6")
+
+        # ---------- run all ----------
+        print("\n=== Tensor Test Suite ===")
+        start = time.time()
+        test_add_basic()
+        test_add_broadcast()
+        test_mul_basic()
+        test_mul_broadcast()
+        test_pow3()
+        test_chain_poly()
+        test_scalar_mul_grad()
+        test_properties()
+        test_finite_diff()
+        total = time.time() - start
+
+        # ---------- summary table ----------
+        _table(
+            headers=["Test", "Forward", "Grad", "Forward max|Δ|", "Grad max|Δ|", "Time", "Notes"],
+            rows=results,
+            title="Summary"
+        )
+        print(f"Total time: {total*1e3:.1f} ms\n")
+
+        # ---------- (optional) failure details ----------
+        if verbose and details:
+            print("Details (failures):")
+            for item in details:
+                name, *pairs = item
+                print(f"\n-- {name} --")
+                for p in pairs:
+                    if len(p) == 3:
+                        tag, got, exp = p
+                        print(f"[{tag}] got:\n{got}\n[expected]:\n{exp}")
+                    else:
+                        print(p)
 
 if __name__ == "__main__":
-    Tensor.run_tests()
+    # Set verbose=True to print per-test matrices when a test fails
+    Tensor.run_tests(verbose=False)
