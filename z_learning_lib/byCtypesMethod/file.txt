@@ -1,0 +1,8 @@
+how to run this code:
+
+gcc -shared -fPIC -o lib.so testlib.c
+
+and then run :
+python3 test.py
+
+"all in terminal"
